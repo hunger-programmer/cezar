@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { REFERENCE_STATUS_MAX } from '@open-mercato/cezar-contract';
 import { autosaveCommit, taskRemotes } from '../../git-worktree.ts';
 import { parseRemote, splitRemoteRef } from '../../git-remotes.ts';
+import { GITHUB_COM } from '../../github-hosts.ts';
 import type {
   DraftPrInput,
   DraftPrOutcome,
@@ -311,11 +312,17 @@ export function rollupToChecks(rollup: z.infer<typeof ghStatusCheckRollup>): Git
   return 'passing';
 }
 
+/** repoRoot → its GitHub Enterprise host, set by `createGithubDriver`. `gh api` (GraphQL, the
+ *  `{owner}/{repo}` placeholders) takes its host from gh's default, not from the repo's remote. */
+const enterpriseHostByRoot = new Map<string, string>();
+
 async function gh(repoRoot: string, args: string[], timeout = 15_000): Promise<string> {
+  const host = enterpriseHostByRoot.get(repoRoot);
   const { stdout } = await exec('gh', args, {
     cwd: repoRoot,
     timeout,
     maxBuffer: 50 * 1024 * 1024,
+    ...(host ? { env: { ...process.env, GH_HOST: host } } : {}),
   });
   return stdout;
 }
@@ -2613,7 +2620,7 @@ function mockGithubComments(kind: 'issue' | 'pr'): ForgeCommentsData {
 // maps to a one-line human error — the GUI
 // shows it as a toast plus the manual `git merge <branch>` fallback. Never throws.
 
-const PR_URL_RE = /https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+/;
+const PR_URL_RE = /https:\/\/[^/\s]+\/[^/\s]+\/[^/\s]+\/pull\/\d+/;
 const PUSH_TIMEOUT_MS = 60_000;
 const PROGRESS_LINES_MAX = 10;
 
@@ -3242,6 +3249,8 @@ const GH_PR_STATES: Record<string, ForgePrStatus['state']> = {
 };
 
 export function createGithubDriver(repoRoot: string, repoRef: GithubRepoRef | null): ForgeDriver {
+  if (repoRef?.host && repoRef.host !== GITHUB_COM) enterpriseHostByRoot.set(repoRoot, repoRef.host);
+  else enterpriseHostByRoot.delete(repoRoot);
   return {
     kind: 'github',
 
@@ -3287,7 +3296,7 @@ export function createGithubDriver(repoRoot: string, repoRef: GithubRepoRef | nu
 
     viewUrl: (kind: ForgeRefKind, ref: string | number): string | null => {
       if (!repoRef) return null;
-      const base = `https://github.com/${repoRef.owner}/${repoRef.repo}`;
+      const base = `https://${repoRef.host ?? GITHUB_COM}/${repoRef.owner}/${repoRef.repo}`;
       // Branch names may contain '/' — encode per segment, keep the slashes.
       const path = String(ref).split('/').map(encodeURIComponent).join('/');
       switch (kind) {
@@ -3317,7 +3326,7 @@ const ghCreatedSchema = z.object({
 async function recentGithubCreated(
   root: string, ref: GithubRepoRef | null, kind: 'issue' | 'pr', sinceDate: string,
 ): Promise<ForgeRecentCreatedData> {
-  if (!ref || !/^[a-zA-Z0-9.-]+$/.test(ref.host ?? 'github.com') ||
+  if (!ref || !/^[a-zA-Z0-9.-]+$/.test(ref.host ?? GITHUB_COM) ||
       !/^[a-zA-Z0-9_.-]+$/.test(ref.owner) || !/^[a-zA-Z0-9_.-]+$/.test(ref.repo) ||
       !/^\d{4}-\d{2}-\d{2}$/.test(sinceDate) || !Number.isFinite(Date.parse(sinceDate))) {
     return { available: false, reason: 'GitHub repository or creation date is invalid', items: [] };
@@ -3327,12 +3336,12 @@ async function recentGithubCreated(
       number: kind === 'issue' ? 101 : 102,
       title: kind === 'issue' ? 'Dashboard example issue' : 'Dashboard example pull request',
       createdAt: new Date().toISOString(),
-      url: `https://${ref.host ?? 'github.com'}/${ref.owner}/${ref.repo}/${kind === 'issue' ? 'issues' : 'pull'}/${kind === 'issue' ? 101 : 102}`,
+      url: `https://${ref.host ?? GITHUB_COM}/${ref.owner}/${ref.repo}/${kind === 'issue' ? 'issues' : 'pull'}/${kind === 'issue' ? 101 : 102}`,
     }] };
   }
   try {
     const output = await gh(root, [
-      'api', '--hostname', ref.host ?? 'github.com', '--method', 'GET', 'search/issues',
+      'api', '--hostname', ref.host ?? GITHUB_COM, '--method', 'GET', 'search/issues',
       '-f', `q=repo:${ref.owner}/${ref.repo} is:${kind} created:>=${sinceDate}`,
       '-f', 'sort=created', '-f', 'order=desc', '-f', 'per_page=30',
     ]);
