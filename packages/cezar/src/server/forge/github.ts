@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { REFERENCE_STATUS_MAX } from '@open-mercato/cezar-contract';
 import { autosaveCommit, taskRemotes } from '../../git-worktree.ts';
 import { parseRemote, splitRemoteRef } from '../../git-remotes.ts';
-import { GITHUB_COM } from '../../github-hosts.ts';
+import { GITHUB_COM, isGithubHost } from '../../github-hosts.ts';
 import type {
   DraftPrInput,
   DraftPrOutcome,
@@ -312,12 +312,31 @@ export function rollupToChecks(rollup: z.infer<typeof ghStatusCheckRollup>): Git
   return 'passing';
 }
 
-/** repoRoot → its GitHub Enterprise host, set by `createGithubDriver`. `gh api` (GraphQL, the
- *  `{owner}/{repo}` placeholders) takes its host from gh's default, not from the repo's remote. */
-const enterpriseHostByRoot = new Map<string, string>();
+/** repoRoot → its GitHub Enterprise host (`null` = github.com). `gh api` (GraphQL, the
+ *  `{owner}/{repo}` placeholders) and `gh repo view` take their host from gh's default, not from
+ *  the repo's remote, so every call pins it with `GH_HOST`. Primed by `createGithubDriver`, and
+ *  resolved from `origin` on a miss: a call whose root string differs from the driver's must
+ *  not silently fall back to github.com. */
+const HOST_TTL_MS = 60_000;
+const enterpriseHostByRoot = new Map<string, { host: string | null; at: number }>();
+
+async function enterpriseHost(repoRoot: string): Promise<string | null> {
+  const hit = enterpriseHostByRoot.get(repoRoot);
+  if (hit && Date.now() - hit.at < HOST_TTL_MS) return hit.host;
+  let host: string | null = null;
+  try {
+    const { stdout } = await exec('git', ['remote', 'get-url', 'origin'], { cwd: repoRoot, timeout: 3_000 });
+    const parsed = parseRemote(stdout.trim());
+    if (parsed && parsed.host !== GITHUB_COM && isGithubHost(parsed.host)) host = parsed.host;
+  } catch {
+    // no origin / not a repo: gh decides
+  }
+  enterpriseHostByRoot.set(repoRoot, { host, at: Date.now() });
+  return host;
+}
 
 async function gh(repoRoot: string, args: string[], timeout = 15_000): Promise<string> {
-  const host = enterpriseHostByRoot.get(repoRoot);
+  const host = await enterpriseHost(repoRoot);
   const { stdout } = await exec('gh', args, {
     cwd: repoRoot,
     timeout,
@@ -2809,7 +2828,9 @@ export async function commentOnPr(
   return { ok: false, error: (res.stderr || res.stdout).trim().split('\n')[0] || 'gh pr comment failed' };
 }
 
-function execTool(args: string[], cwd: string, bin: string, timeoutMs = 30_000): Promise<ExecResult> {
+async function execTool(args: string[], cwd: string, bin: string, timeoutMs = 30_000): Promise<ExecResult> {
+  // Same pin as `gh()`: PR create/comment/update must hit the repo's own host, not gh's default.
+  const ghHost = bin === 'gh' ? await enterpriseHost(cwd) : null;
   return new Promise((resolve) => {
     execFile(
       bin,
@@ -2823,7 +2844,7 @@ function execTool(args: string[], cwd: string, bin: string, timeoutMs = 30_000):
         // piped stdio is not enough to stop it. Without this a `git push` that
         // cannot authenticate hangs for the whole timeout and surfaces as a
         // blank one-minute stall instead of git's own "could not read Username".
-        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0', ...(ghHost ? { GH_HOST: ghHost } : {}) },
       },
       (err, stdout, stderr) =>
         resolve({
@@ -3249,8 +3270,10 @@ const GH_PR_STATES: Record<string, ForgePrStatus['state']> = {
 };
 
 export function createGithubDriver(repoRoot: string, repoRef: GithubRepoRef | null): ForgeDriver {
-  if (repoRef?.host && repoRef.host !== GITHUB_COM) enterpriseHostByRoot.set(repoRoot, repoRef.host);
-  else enterpriseHostByRoot.delete(repoRoot);
+  enterpriseHostByRoot.set(repoRoot, {
+    host: repoRef?.host && repoRef.host !== GITHUB_COM ? repoRef.host : null,
+    at: Date.now(),
+  });
   return {
     kind: 'github',
 
