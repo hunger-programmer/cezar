@@ -47,6 +47,15 @@ describe('GithubPoller', () => {
     expect(result.candidates.map((c) => c.nodeId).sort()).toEqual(['cloud', 'ghes']);
   });
 
+  it('accepts the Enterprise Cloud repository_url on a *.ghe.com host', async () => {
+    const run = vi.fn(async () => JSON.stringify({ items: [
+      { ...item, node_id: 'cloud', repository_url: 'https://api.schibsted.ghe.com/repos/acme/demo' },
+      { ...item, node_id: 'foreign', repository_url: 'https://api.schibsted.ghe.com/repos/acme/other' },
+    ] }));
+    const result = await new GithubPoller({ run, host: 'schibsted.ghe.com' }).poll('acme', 'demo', definition);
+    expect(result.candidates.map((c) => c.nodeId)).toEqual(['cloud']);
+  });
+
   it('adds no --hostname for github.com', async () => {
     const run = vi.fn(async (_executable: string, _args: readonly string[]) => JSON.stringify({ items: [] }));
     await new GithubPoller({ run, host: 'github.com' }).poll('acme', 'demo', definition);

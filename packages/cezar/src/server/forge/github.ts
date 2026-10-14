@@ -5,6 +5,7 @@ import { REFERENCE_STATUS_MAX } from '@open-mercato/cezar-contract';
 import { autosaveCommit, taskRemotes } from '../../git-worktree.ts';
 import { parseRemote, splitRemoteRef } from '../../git-remotes.ts';
 import { GITHUB_COM, isGithubHost } from '../../github-hosts.ts';
+import { getRepoInfo } from '../git.ts';
 import type {
   DraftPrInput,
   DraftPrOutcome,
@@ -314,24 +315,29 @@ export function rollupToChecks(rollup: z.infer<typeof ghStatusCheckRollup>): Git
 
 /** repoRoot → its GitHub Enterprise host (`null` = github.com). `gh api` (GraphQL, the
  *  `{owner}/{repo}` placeholders) and `gh repo view` take their host from gh's default, not from
- *  the repo's remote, so every call pins it with `GH_HOST`. Primed by `createGithubDriver`, and
- *  resolved from `origin` on a miss: a call whose root string differs from the driver's must
- *  not silently fall back to github.com. */
+ *  the repo's remote, so every call pins it with `GH_HOST`. Resolved with `getRepoInfo`'s remote
+ *  choice (origin, else the first remote) so a worktree cwd or an expired entry pins the same host
+ *  the driver was built for. Bounded like `detectCache`: `execTool` sees one key per worktree. */
 const HOST_TTL_MS = 60_000;
+const HOST_CACHE_MAX = 50;
 const enterpriseHostByRoot = new Map<string, { host: string | null; at: number }>();
+
+function rememberHost(repoRoot: string, host: string | null): void {
+  enterpriseHostByRoot.delete(repoRoot); // re-insert so this key becomes the newest
+  enterpriseHostByRoot.set(repoRoot, { host, at: Date.now() });
+  while (enterpriseHostByRoot.size > HOST_CACHE_MAX) {
+    const oldest = enterpriseHostByRoot.keys().next().value;
+    if (oldest === undefined) break;
+    enterpriseHostByRoot.delete(oldest);
+  }
+}
 
 async function enterpriseHost(repoRoot: string): Promise<string | null> {
   const hit = enterpriseHostByRoot.get(repoRoot);
   if (hit && Date.now() - hit.at < HOST_TTL_MS) return hit.host;
-  let host: string | null = null;
-  try {
-    const { stdout } = await exec('git', ['remote', 'get-url', 'origin'], { cwd: repoRoot, timeout: 3_000 });
-    const parsed = parseRemote(stdout.trim());
-    if (parsed && parsed.host !== GITHUB_COM && isGithubHost(parsed.host)) host = parsed.host;
-  } catch {
-    // no origin / not a repo: gh decides
-  }
-  enterpriseHostByRoot.set(repoRoot, { host, at: Date.now() });
+  const parsed = parseRemote((await getRepoInfo(repoRoot))?.remote ?? '');
+  const host = parsed && parsed.host !== GITHUB_COM && isGithubHost(parsed.host) ? parsed.host : null;
+  rememberHost(repoRoot, host);
   return host;
 }
 
@@ -3270,10 +3276,7 @@ const GH_PR_STATES: Record<string, ForgePrStatus['state']> = {
 };
 
 export function createGithubDriver(repoRoot: string, repoRef: GithubRepoRef | null): ForgeDriver {
-  enterpriseHostByRoot.set(repoRoot, {
-    host: repoRef?.host && repoRef.host !== GITHUB_COM ? repoRef.host : null,
-    at: Date.now(),
-  });
+  rememberHost(repoRoot, repoRef?.host && repoRef.host !== GITHUB_COM ? repoRef.host : null);
   return {
     kind: 'github',
 

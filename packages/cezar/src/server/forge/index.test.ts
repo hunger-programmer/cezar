@@ -97,6 +97,7 @@ describe('GitHub driver viewUrl', () => {
 
 describe('GitHub Enterprise', () => {
   let configDir: string;
+  const savedConfigDir = process.env.GH_CONFIG_DIR;
   beforeEach(() => {
     configDir = mkdtempSync(join(tmpdir(), 'cez-ghe-'));
     process.env.GH_CONFIG_DIR = configDir;
@@ -104,16 +105,23 @@ describe('GitHub Enterprise', () => {
   });
   afterEach(() => {
     rmSync(configDir, { recursive: true, force: true });
+    process.env.GH_CONFIG_DIR = savedConfigDir;
     resetGithubHostsCache();
   });
 
   it.each([
     'https://company.ghe.com/acme/demo.git',
-    'git@github.company.com:acme/demo.git',
-    'ssh://git@github.internal.example.org:2222/acme/demo.git',
+    'git@schibsted.ghe.com:tvnu/Backstage.git',
   ])('recognizes %s without any gh config', (remote) => {
     expect(forgeKindOfRemote(remote)).toBe('github');
     expect(resolveForge(info(remote))?.kind).toBe('github');
+  });
+
+  it.each([
+    'git@github.company.com:acme/demo.git',
+    'https://github.internal/o/r',
+  ])('does not guess GitHub from a github.* name without a login (%s)', (remote) => {
+    expect(forgeKindOfRemote(remote)).toBeNull();
   });
 
   it('recognizes any host gh is signed in to, on any domain', () => {

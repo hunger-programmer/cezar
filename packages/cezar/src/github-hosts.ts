@@ -5,9 +5,10 @@ import { join } from 'node:path';
 /**
  * Which remote hosts are GitHub — github.com plus GitHub Enterprise, wherever it lives. A
  * self-hosted GHES can sit on any domain, so the name alone can't decide; zero-config discovery
- * reads what `gh` already knows: the hosts it is signed in to (`hosts.yml`) and `GH_HOST`. The
- * `*.ghe.com` (Enterprise Cloud with data residency) and `github.*` names count without a login so
- * the tab shows up and `gh` can say "sign in to <host>" instead of the tab being silently hidden.
+ * reads what `gh` already knows: the hosts it is signed in to (`hosts.yml`) and `GH_HOST`.
+ * `*.ghe.com` (Enterprise Cloud) is GitHub by construction, so it counts without a login and `gh`
+ * can say "sign in to <host>" instead of the tab being silently hidden. A bare `github.*` name
+ * does not: it is a guess, and a GitLab box called `github.corp` would get a tab that only fails.
  */
 
 export const GITHUB_COM = 'github.com';
@@ -50,7 +51,7 @@ export function isGithubHost(host: string | undefined, env: NodeJS.ProcessEnv = 
   if (!host) return false;
   const h = host.toLowerCase();
   if (!isSafeHostname(h)) return false;
-  if (h === GITHUB_COM || h.endsWith('.ghe.com') || h.split('.')[0] === 'github') return true;
+  if (h === GITHUB_COM || h.endsWith('.ghe.com')) return true;
   return ghConfiguredHosts(env).has(h);
 }
 

@@ -516,6 +516,9 @@ function refUrlRepo(url: string): string | undefined {
  * Note what this does not touch: `referenced*Candidates` keep recording every URL as evidence.
  * The fix changes what is *promoted*, never what is *collected* (the #526 rule).
  */
+// Compares `owner/repo` only: `RepoHandle` carries no host, so the same slug on another GitHub
+// host (Enterprise vs github.com) reads as in-repo. Rare enough to accept; add a host to the
+// handle if it ever bites.
 function isRepoScopedRef(url: string, task: string, handle?: RepoHandle | null): boolean {
   if (!handle) return true;
   const repo = refUrlRepo(url);
