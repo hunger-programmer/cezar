@@ -3396,7 +3396,7 @@ describe('GH_HOST pinning (GitHub Enterprise)', () => {
   const answer = (origin: string) =>
     execFileMock.mockImplementation((...args: unknown[]) => {
       const cb = args[args.length - 1] as (e: unknown, r: unknown) => void;
-      const stdout = args[0] === 'git' ? `${origin}\n` : '{"nameWithOwner":"tvnu/Backstage"}';
+      const stdout = args[0] === 'git' ? `${origin}\n` : '{"nameWithOwner":"acme/widgets"}';
       cb(null, { stdout, stderr: '' });
     });
   const ghEnv = (root: string) =>
@@ -3410,9 +3410,9 @@ describe('GH_HOST pinning (GitHub Enterprise)', () => {
   afterEach(() => vi.unstubAllEnvs());
 
   it('pins each repo to its own origin host, with no help from the driver', async () => {
-    answer('git@schibsted.ghe.com:tvnu/Backstage.git');
+    answer('git@acme.ghe.com:acme/widgets.git');
     await resolveRepoHandle('/repo/ghe-pin');
-    expect(ghEnv('/repo/ghe-pin').env?.GH_HOST).toBe('schibsted.ghe.com');
+    expect(ghEnv('/repo/ghe-pin').env?.GH_HOST).toBe('acme.ghe.com');
     answer('git@github.com:open-mercato/cezar.git');
     await resolveRepoHandle('/repo/com-pin');
     expect(ghEnv('/repo/com-pin').env?.GH_HOST).toBeUndefined();
@@ -3422,16 +3422,16 @@ describe('GH_HOST pinning (GitHub Enterprise)', () => {
     execFileMock.mockImplementation((...args: unknown[]) => {
       const cb = args[args.length - 1] as (e: unknown, r: unknown) => void;
       const [bin, argv] = args as [string, string[]];
-      if (bin === 'gh') return cb(null, { stdout: 'tvnu/Backstage', stderr: '' });
+      if (bin === 'gh') return cb(null, { stdout: 'acme/widgets', stderr: '' });
       const cmd = argv.join(' ');
       if (cmd === 'rev-parse --show-toplevel') return cb(null, { stdout: '/repo/no-origin\n', stderr: '' });
       if (cmd === 'rev-parse --abbrev-ref HEAD') return cb(null, { stdout: 'main\n', stderr: '' });
       if (cmd === 'remote get-url origin') return cb(new Error('No such remote'), { stdout: '', stderr: '' });
       if (cmd === 'remote') return cb(null, { stdout: 'ghe\n', stderr: '' });
-      if (cmd === 'remote get-url ghe') return cb(null, { stdout: 'git@schibsted.ghe.com:tvnu/Backstage.git\n', stderr: '' });
+      if (cmd === 'remote get-url ghe') return cb(null, { stdout: 'git@acme.ghe.com:acme/widgets.git\n', stderr: '' });
       return cb(new Error(`unexpected git ${cmd}`), { stdout: '', stderr: '' });
     });
     await resolveRepoHandle('/repo/no-origin');
-    expect(ghEnv('/repo/no-origin').env?.GH_HOST).toBe('schibsted.ghe.com');
+    expect(ghEnv('/repo/no-origin').env?.GH_HOST).toBe('acme.ghe.com');
   });
 });

@@ -49,10 +49,10 @@ describe('GithubPoller', () => {
 
   it('accepts the Enterprise Cloud repository_url on a *.ghe.com host', async () => {
     const run = vi.fn(async () => JSON.stringify({ items: [
-      { ...item, node_id: 'cloud', repository_url: 'https://api.schibsted.ghe.com/repos/acme/demo' },
-      { ...item, node_id: 'foreign', repository_url: 'https://api.schibsted.ghe.com/repos/acme/other' },
+      { ...item, node_id: 'cloud', repository_url: 'https://api.acme.ghe.com/repos/acme/demo' },
+      { ...item, node_id: 'foreign', repository_url: 'https://api.acme.ghe.com/repos/acme/other' },
     ] }));
-    const result = await new GithubPoller({ run, host: 'schibsted.ghe.com' }).poll('acme', 'demo', definition);
+    const result = await new GithubPoller({ run, host: 'acme.ghe.com' }).poll('acme', 'demo', definition);
     expect(result.candidates.map((c) => c.nodeId)).toEqual(['cloud']);
   });
 

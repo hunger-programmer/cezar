@@ -111,7 +111,7 @@ describe('GitHub Enterprise', () => {
 
   it.each([
     'https://company.ghe.com/acme/demo.git',
-    'git@schibsted.ghe.com:tvnu/Backstage.git',
+    'git@acme.ghe.com:acme/widgets.git',
   ])('recognizes %s without any gh config', (remote) => {
     expect(forgeKindOfRemote(remote)).toBe('github');
     expect(resolveForge(info(remote))?.kind).toBe('github');
